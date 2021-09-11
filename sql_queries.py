@@ -3,7 +3,7 @@ import configparser
 # CONFIG
 config = configparser.ConfigParser()
 config.read('dwh.cfg')
-s3_role = config.get('IAM_ROLE','ARN')
+
 
 # DROP TABLES
 
@@ -17,41 +17,41 @@ time_table_drop = "DROP TABLE IF EXISTS time;"
 
 # CREATE TABLES
 
-staging_events_table_create= ("""
-    create table if not exists staging_events(
-        artist Varchar,
-        auth VARCHAR(12),
-        firstName VARCHAR,
-        gender            VARCHAR,
-        itemInSession     INT,
-        lastName          VARCHAR,
-        length            FLOAT8,
-        level             VARCHAR,
-        location          VARCHAR,
-        method            VARCHAR,
-        page              VARCHAR,
-        registration      VARCHAR,
-        sessionId         INT,
-        song              VARCHAR,
-        status            INT,
-        ts                BIGINT,
-        userAgent         VARCHAR,
-        userId            INT  
-    );
+staging_events_table_create = ("""
+CREATE TABLE IF NOT EXISTS "staging_events" (
+    "artist" VARCHAR,
+    "auth" VARCHAR(12),
+    "firstName" VARCHAR,
+    "lastName" VARCHAR,
+    "gender" CHAR,
+    "itemInSession" INTEGER,
+    "length" DECIMAL,
+    "level" VARCHAR(12),
+    "location" VARCHAR,
+    "method" VARCHAR(7),
+    "page" VARCHAR,
+    "registration" BIGINT,
+    "sessionId" INTEGER,
+    "song" VARCHAR,
+    "status" SMALLINT,
+    "ts" BIGINT,
+    "userAgent" VARCHAR,
+    "userId" INTEGER
+);
 """)
 
 staging_songs_table_create = ("""
-    CREATE TABLE IF NOT EXISTS "staging_songs" (
-        artist_id VARCHAR,
-        artist_latitude DECIMAL,
-        artist_location VARCHAR,
-        artist_longitude DECIMAL,
-        artist_name VARCHAR,
-        duration DECIMAL,
-        num_songs INTEGER,
-        song_id VARCHAR,
-        title VARCHAR,
-        year INTEGER
+CREATE TABLE IF NOT EXISTS "staging_songs" (
+    "artist_id" VARCHAR NOT NULL,
+    "artist_latitude" DECIMAL,
+    "artist_location" VARCHAR,
+    "artist_longitude" DECIMAL,
+    "artist_name" VARCHAR,
+    "duration" DECIMAL,
+    "num_songs" INTEGER,
+    "song_id" VARCHAR,
+    "title" VARCHAR,
+    "year" INTEGER
 );
 """)
 
@@ -114,145 +114,128 @@ time_table_create = ("""
 # STAGING TABLES
 
 staging_events_copy = ("""
-    COPY staging_events FROM {}
-    CREDENTIALS 'aws_iam_role={s3_role}'
-    JSON {} 
-    COMPUPDATE OFF REGION 'us-west-2';
-""")
+    COPY staging_events_table FROM {} 
+    CREDENTIALS 'aws_iam_role={}' 
+    json {}
+    """).format(config.get('S3', 'LOG_DATA'),
+             config.get('IAM_ROLE', 'ARN'),
+             config.get('S3', 'LOG_JSONPATH'))
 
 staging_songs_copy = ("""
-    COPY staging_songs FROM {}
-    CREDENTIALS 'aws_iam_role={s3_role}'
-    JSON 'auto'
-    COMPUPDATE OFF REGION 'us-west-2';
-""")
+    COPY staging_songs_table FROM {} 
+    CREDENTIALS 'aws_iam_role={}' 
+    json {}
+    """).format(config.get('S3', 'SONG_DATA'),
+             config.get('IAM_ROLE', 'ARN'),
+             config.get('S3', 'LOG_JSONPATH'))
 
 # FINAL TABLES
 
 songplay_table_insert = ("""
-    INSERT INTO songplays (
-        start_time,
-        user_id,
-        level,
-        song_id,
-        artist_id,
-        session_id,
-        location,
-        user_agent
-    )
-    SELECT
-        (TIMESTAMP 'epoch' + se.ts/1000*INTERVAL '1 second') AS start_time,
-        se.userId,
-        se.level,
-        ss.song_id,
-        ss.artist_id,
-        se.sessionId,
-        se.location,
-        se.userAgent
-    FROM staging_events se
-        LEFT JOIN staging_songs ss
-            ON se.song = ss.title
-            AND se.artist = ss.artist_name
-            AND se.length = ss.duration
-    WHERE se.userId IS NOT NULL
-        AND ss.artist_id IS NOT NULL
-        AND se.level IS NOT NULL
-        AND se.sessionId IS NOT NULL
-        AND ss.song_id IS NOT NULL
-        AND se.ts IS NOT NULL
-        AND se.sessionId NOT IN (SELECT DISTINCT session_id FROM songplays)
-        AND se.page = 'NextSong';
+INSERT INTO songplays (
+    user_id, 
+    level,
+    start_time,
+    song_id,
+    artist_id,
+    session_id,
+    location,
+    user_agent
+)
+SELECT
+    userId as user_id, 
+    level,
+    TIMESTAMP 'epoch' + se.ts/1000 * INTERVAL '1 second' as start_time,
+    song_id,
+    ss.artist_id,
+    sessionId as session_id,
+    location,
+    userAgent as user_agent
+    
+FROM staging_events AS se
+JOIN staging_songs AS ss
+    ON se.artist = ss.artist_name
+WHERE se.page = 'NextSong';
 """)
 
 user_table_insert = ("""
-    INSERT INTO users
-    (
-      user_id,
-      first_name,
-      last_name,
-      gender,
-      level
-    )    
-    SELECT
-        DISTINCT userId,
-        firstName,
-        lastName,
-        gender,
-        level
-    FROM staging_events
-    WHERE userId IS NOT NULL
-        AND level IS NOT NULL
-        AND userId NOT IN (SELECT DISTINCT user_id FROM users);
+INSERT INTO users (
+    user_id,
+    first_name,
+    last_name,
+    gender,
+    level           
+    )
+SELECT 
+    DISTINCT userId,
+    firstName,
+    lastName,
+    gender,
+    level
+    FROM staging_events AS es1
+        WHERE userId IS NOT null
+        AND ts = (SELECT max(ts) 
+                  FROM staging_events AS es2 
+                  WHERE es1.userId = es2.userId)
+ORDER BY userId DESC;
 """)
 
 song_table_insert = ("""
-    INSERT INTO songs
-    (
-      song_id,
-      title,
-      artist_id,
-      year,
-      duration
-    )
-    SELECT
-        DISTINCT song_id,
-        title,
-        artist_id,
-        year,
-        duration
-    FROM staging_songs
-    WHERE song_id IS NOT NULL
-        AND title IS NOT NULL
-        AND artist_id IS NOT NULL
-        AND song_id NOT IN (SELECT DISTINCT song_id FROM songs);
+INSERT INTO songs (
+    song_id,
+    title,
+    artist_id,
+    year,
+    duration
+)
+SELECT
+    song_id,
+    title,
+    artist_id,
+    year,
+    duration
+FROM staging_songs;
 """)
 
 artist_table_insert = ("""
-    INSERT INTO artists
-    (
-      artist_id,
-      name,
-      location,
-      latitude,
-      longitude
-    )
-    SELECT
-        DISTINCT artist_id,
-        artist_name,
-        artist_location,
-        artist_latitude,
-        artist_longitude
-    FROM staging_songs
-    WHERE artist_id IS NOT NULL
-        AND artist_name is NOT NULL
-        AND artist_id NOT IN (SELECT DISTINCT artist_id FROM artists);
+INSERT INTO artists (
+    artist_id,
+    name,
+    --location,
+    latitude,
+    longitude
+)
+SELECT
+    artist_id,
+    artist_name,
+    --artist_location,
+    artist_latitude,
+    artist_longitude
     
+FROM staging_songs;
 """)
 
 time_table_insert = ("""
-    INSERT INTO time
-    (
-      start_time,
-      hour,
-      day,
-      week,
-      month,
-      year,
-      weekday
-    )
-    SELECT
-        DISTINCT start_time,
-        EXTRACT(HOUR FROM start_time),
-        EXTRACT(DAY FROM start_time),
-        EXTRACT(WEEK FROM start_time),
-        EXTRACT(MONTH FROM start_time),
-        EXTRACT(YEAR FROM start_time),
-        EXTRACT(WEEKDAY FROM start_time)
-    FROM (SELECT
-            TIMESTAMP 'epoch' + ts/1000*INTERVAL '1 second' AS start_time
-        FROM staging_events
-            WHERE ts IS NOT NULL) sub
-    WHERE start_time NOT IN (SELECT DISTINCT start_time FROM time);
+INSERT INTO time (
+    start_time,
+    hour,
+    day,
+    week,
+    month,
+    year,
+    weekday
+)
+SELECT  
+    DISTINCT TIMESTAMP 'epoch' + ts/1000 * INTERVAL '1 second' as start_time,
+    EXTRACT(hour FROM start_time) AS hour,
+    EXTRACT(day FROM start_time) AS day,
+    EXTRACT(week FROM start_time) AS week,
+    EXTRACT(month FROM start_time) AS month,
+    EXTRACT(year FROM start_time) AS year,
+    EXTRACT(week FROM start_time) AS weekday
+    
+FROM staging_events
+WHERE staging_events.page = 'NextSong';
 """)
 
 # QUERY LISTS
