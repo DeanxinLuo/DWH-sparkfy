@@ -17,27 +17,26 @@ time_table_drop = "DROP TABLE IF EXISTS time;"
 
 # CREATE TABLES
 
-staging_events_table_create = ("""
-CREATE TABLE IF NOT EXISTS "staging_events" (
-    "artist" VARCHAR,
-    "auth" VARCHAR(12),
-    "firstName" VARCHAR,
-    "lastName" VARCHAR,
-    "gender" CHAR,
-    "itemInSession" INTEGER,
-    "length" DECIMAL,
-    "level" VARCHAR(12),
-    "location" VARCHAR,
-    "method" VARCHAR(7),
-    "page" VARCHAR,
-    "registration" BIGINT,
-    "sessionId" INTEGER,
-    "song" VARCHAR,
-    "status" SMALLINT,
-    "ts" BIGINT,
-    "userAgent" VARCHAR,
-    "userId" INTEGER
-);
+staging_events_table_create= ("""
+    CREATE TABLE IF NOT EXISTS staging_events (
+        artist VARCHAR ,
+        auth VARCHAR,
+        first_name VARCHAR,
+        gender VARCHAR,
+        item_in_session INT,
+        last_name VARCHAR,
+        length NUMERIC,
+        level VARCHAR,
+        location VARCHAR,
+        method VARCHAR,
+        page VARCHAR,
+        registration NUMERIC,
+        session_id NUMERIC,
+        song VARCHAR,
+        status INT,
+        timestamp BIGINT,
+        user_agent VARCHAR,
+        user_id INT)
 """)
 
 staging_songs_table_create = ("""
@@ -123,10 +122,9 @@ staging_events_copy = ("""
 staging_songs_copy = ("""
     COPY staging_songs FROM {} 
     CREDENTIALS 'aws_iam_role={}' 
-    json {}
+    json 'auto'
     """).format(config.get('S3', 'SONG_DATA'),
-             config.get('IAM_ROLE', 'ARN'),
-             config.get('S3', 'LOG_JSONPATH'))
+             config.get('IAM_ROLE', 'ARN'))
 
 # FINAL TABLES
 
